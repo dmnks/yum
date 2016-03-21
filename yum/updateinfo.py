@@ -31,11 +31,29 @@ def _ysp_safe_refs(refs):
         return []
     return refs
 
+def _match_advisory(id_, pattern, wildcards=True):
+    """Return whether the pattern matches the advisory ID."""
+
+    # Shall we parse any wildcards in the pattern?
+    if wildcards:
+        compare = fnmatch.fnmatch
+    else:
+        compare = lambda x, y: x == y
+
+    if compare(id_, pattern):
+        return True
+    else:
+        newpat, _ = misc.split_advisory(pattern)
+        if newpat == pattern:
+            # We already know that id_ != pattern
+            return False
+        return compare(id_, newpat)
+
 def _match_sec_cmd(sec_cmds, pkgname, notice):
     for i in sec_cmds:
         if fnmatch.fnmatch(pkgname, i):
             return i
-        if fnmatch.fnmatch(notice['update_id'], i):
+        if _match_advisory(notice['update_id'], i):
             return i
 
         cvei = i
@@ -68,9 +86,11 @@ def _ysp_should_filter_pkg(opts, pkgname, notice, used_map):
     if rcmd:
         used_map['cmd'][rcmd] = True
         return True
-    elif opts.advisory and notice['update_id'] in opts.advisory:
-        used_map['id'][notice['update_id']] = True
-        return True
+    elif opts.advisory:
+        for pattern in opts.advisory:
+            if _match_advisory(notice['update_id'], pattern, False):
+                used_map['id'][pattern] = True
+                return True
     elif (opts.severity and notice['type'] == 'security' and
           notice['severity'] in opts.severity):
         used_map['sev'][notice['severity']] = True
