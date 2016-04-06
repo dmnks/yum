@@ -4108,7 +4108,7 @@ class UpdateinfoCommand(YumCommand):
                 extcmds, show_type, filt_type = self._parse_extcmds(extcmds)
 
         opts.sec_cmds = extcmds
-        used_map = _upi._ysp_gen_used_map(base.updateinfo_filters)
+        used_map = _upi._ysp_gen_used_map(opts)
         iname2tup = {}
         if False: pass
         elif list_type == 'installed':
@@ -4145,16 +4145,17 @@ class UpdateinfoCommand(YumCommand):
                     yield (pkgtup, notice)
 
         data = []
-        for pkgname in sorted(name2tup):
-            for (pkgtup, notice) in _show_pkgtup(name2tup[pkgname]):
-                d = {}
-                (d['n'], d['a'], d['e'], d['v'], d['r']) = pkgtup
-                if d['e'] == '0':
-                    d['epoch'] = ''
-                else:
-                    d['epoch'] = "%s:" % d['e']
-                data.append((notice, pkgtup,
-                            "%(n)s-%(epoch)s%(v)s-%(r)s.%(a)s" % d))
+        for opts in _upi._opts_chain(opts, used_map):
+            for pkgname in sorted(name2tup):
+                for (pkgtup, notice) in _show_pkgtup(name2tup[pkgname]):
+                    d = {}
+                    (d['n'], d['a'], d['e'], d['v'], d['r']) = pkgtup
+                    if d['e'] == '0':
+                        d['epoch'] = ''
+                    else:
+                        d['epoch'] = "%s:" % d['e']
+                    data.append((notice, pkgtup,
+                                "%(n)s-%(epoch)s%(v)s-%(r)s.%(a)s" % d))
         show_pkgs(base, md_info, list_type, show_type, iname2tup, data, msg)
 
         _upi._ysp_chk_used_map(used_map, msg)

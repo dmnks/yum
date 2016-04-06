@@ -92,6 +92,56 @@ def _ysp_should_filter_pkg(opts, pkgname, notice, used_map):
 
     return False
 
+def _opts_fallback(used_map, xform_map):
+    """Return an opts instance based on what's unmatched in used_map.
+
+    xform_map defines how some of the opts attributes will be constructed by
+    transforming their counterparts in used_map.
+    """
+
+    umap2attr = {
+        'cmd': 'sec_cmds',
+        'id': 'advisory',
+    }
+
+    newopts = _updateinfofilter2opts(dict())
+    empty = True
+    for uattr, xform in xform_map.iteritems():
+        unmatched = [i for i in used_map[uattr] if not used_map[uattr][i]]
+        xformed = [xform(i) for i in unmatched]
+        # Only use what's different when transformed
+        diff = set(xformed) - set(unmatched)
+        if diff:
+            empty = False
+        setattr(newopts, umap2attr[uattr], list(diff))
+    if not empty:
+        return newopts
+    else:
+        return None
+
+def _opts_chain(opts, used_map):
+    """Generate opts instances to be tried when matching packages.
+
+    Start with the provided opts instance and then, if some attributes were not
+    matched according to used_map, try to guess what the user meant and come up
+    with alternative opts instances reflecting that, one after another.
+    """
+
+    def strip_respin(id_):
+        """Return the advisory ID stripped off of any respin suffix."""
+        root, respin = misc.split_advisory(id_)
+        return root
+
+    xform_maps = [
+        {'cmd': strip_respin, 'id': strip_respin},
+    ]
+
+    yield opts
+    for xmap in xform_maps:
+        fb = _opts_fallback(used_map, xmap)
+        if fb is not None:
+            yield fb
+
 def _ysp_has_info_md(rname, md):
     if rname in _update_info_types_:
         if md['type'] == rname:
@@ -174,8 +224,6 @@ def _args2filters(args):
 
 def _ysp_gen_used_map(opts):
     used_map = {'bugzilla' : {}, 'cve' : {}, 'id' : {}, 'cmd' : {}, 'sev' : {}}
-    if True:
-        return used_map
     for i in opts.sec_cmds:
         used_map['cmd'][i] = False
     for i in opts.advisory:
@@ -328,18 +376,18 @@ def remove_txmbrs(base, filters=None):
     for tspkg in tspkgs:
         if tspkg.output_state in count_states:
             count_pkgs.add(tspkg.po)
+            tot += 1
 
     name2tup = _get_name2oldpkgtup(base)
-    for tspkg in tspkgs:
-        if tspkg.output_state in count_states:
-            tot += 1
-        name = tspkg.po.name
-        if (name not in name2tup or
-            not _ysp_should_keep_pkg(opts, name2tup[name], md_info, used_map)):
-            continue
-        if tspkg.output_state in count_states:
-            cnt += 1
-        keep_pkgs.add(tspkg.po)
+    for opts in _opts_chain(opts, used_map):
+        for tspkg in tspkgs:
+            name = tspkg.po.name
+            if (name not in name2tup or
+                not _ysp_should_keep_pkg(opts, name2tup[name], md_info, used_map)):
+                continue
+            if tspkg.output_state in count_states:
+                cnt += 1
+            keep_pkgs.add(tspkg.po)
 
     scnt = cnt
     mini_depsolve_again = True
@@ -412,13 +460,14 @@ def exclude_updates(base, filters=None):
     
     cnt = 0
     pkgs_to_del = []
-    for pkg in pkgs:
-        name = pkg.name
-        if (name not in name2tup or
-            not _ysp_should_keep_pkg(opts, name2tup[name], md_info, used_map)):
-                pkgs_to_del.append(pkg.name)
-            continue
-        cnt += 1
+    for opts in _opts_chain(opts, used_map):
+        for pkg in pkgs:
+            name = pkg.name
+            if (name not in name2tup or
+                not _ysp_should_keep_pkg(opts, name2tup[name], md_info, used_map)):
+                    pkgs_to_del.append(pkg.name)
+                continue
+            cnt += 1
     if pkgs_to_del:
         for p in base.doPackageLists(pkgnarrow='available', patterns=pkgs_to_del, showdups=True).available:
             ysp_del_pkg(p)
@@ -458,16 +507,16 @@ def exclude_all(base, filters=None):
     pkgs = base.pkgSack.returnPackages()
     name2tup = _get_name2aallpkgtup(base)
     
-    tot = 0
+    tot = len(pkgs)
     cnt = 0
-    for pkg in pkgs:
-        tot += 1
-        name = pkg.name
-        if (name not in name2tup or
-            not _ysp_should_keep_pkg(opts, name2tup[name], md_info, used_map)):
-            ysp_del_pkg(pkg)
-            continue
-        cnt += 1
+    for opts in _opts_chain(opts, used_map):
+        for pkg in pkgs:
+            name = pkg.name
+            if (name not in name2tup or
+                not _ysp_should_keep_pkg(opts, name2tup[name], md_info, used_map)):
+                ysp_del_pkg(pkg)
+                continue
+            cnt += 1
 
     _ysp_chk_used_map(used_map, lambda x: base.verbose_logger.warn("%s", x))
 
@@ -486,8 +535,8 @@ def update_minimal(base, extcmds=[]):
     """
     txmbrs = []
 
-    used_map = _ysp_gen_used_map(base.updateinfo_filters)
     opts     = _updateinfofilter2opts(base.updateinfo_filters)
+    used_map = _ysp_gen_used_map(opts)
     ndata    = _no_options(opts)
 
     # NOTE: Not doing obsoletes processing atm. ... maybe we should? --
@@ -500,22 +549,24 @@ def update_minimal(base, extcmds=[]):
 
     # Tuples == (n, a, e, v, r)
     oupdates  = map(lambda x: x[1], base.up.getUpdatesTuples())
-    for oldpkgtup in sorted(oupdates):
-        data = base.upinfo.get_applicable_notices(oldpkgtup)
-        if ndata: # No options means pick the oldest update
-            data.reverse()
+    oupdates.sort()
+    for opts in _opts_chain(opts, used_map):
+        for oldpkgtup in oupdates:
+            data = base.upinfo.get_applicable_notices(oldpkgtup)
+            if ndata: # No options means pick the oldest update
+                data.reverse()
 
-        for (pkgtup, notice) in data:
-            name = pkgtup[0]
-            if extcmds and not _match_sec_cmd(extcmds, name, notice):
-                continue
-            if (not ndata and
-                not _ysp_should_filter_pkg(opts, name, notice, used_map)):
-                continue
-            txmbrs.extend(base.update(name=pkgtup[0], arch=pkgtup[1],
-                                      epoch=pkgtup[2],
-                                      version=pkgtup[3], release=pkgtup[4]))
-            break
+            for (pkgtup, notice) in data:
+                name = pkgtup[0]
+                if extcmds and not _match_sec_cmd(extcmds, name, notice):
+                    continue
+                if (not ndata and
+                    not _ysp_should_filter_pkg(opts, name, notice, used_map)):
+                    continue
+                txmbrs.extend(base.update(name=pkgtup[0], arch=pkgtup[1],
+                                          epoch=pkgtup[2],
+                                          version=pkgtup[3], release=pkgtup[4]))
+                break
 
     # _ysp_chk_used_map(used_map, msg)
 
