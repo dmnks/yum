@@ -387,6 +387,9 @@ class YumRepository(Repository, config.RepoConf):
         self._grabfunc = None
         self._grab = None
         self._async = False
+        # Whenever we preload some MD from the system-wide cache, we record the
+        # filename here
+        self._preloaded_files = set()
 
     def __cmp__(self, other):
         """ Sort yum repos. by cost, and then by alphanumeric on their id. """
@@ -1860,7 +1863,13 @@ Insufficient space in download directory %s
                     raise
                 self.retrieved[mdtype] = 1
             text = "%s/%s" % (self.ui_id, mdtype)
-            if thisdata.size is None:
+            # Check if this MD appears to be a partial download and if it does,
+            # attempt to reget it.  Normally, having the MD but smaller than
+            # expected indicates a partial download.  However, that may not be
+            # the case with some code paths where we have preloaded a new
+            # version of either the MD or repomd.xml (but not both) when we get
+            # here and the new MD also happens to be smaller (BZ 1155687).
+            if thisdata.size is None or set([fname, 'repomd.xml']) & self._preloaded_files:
                 reget = None
             else:
                 reget = 'simple'
@@ -2039,7 +2048,10 @@ Insufficient space in download directory %s
     def _preload_md_from_system_cache(self, filename):
         """attempts to copy the metadata file from the system-wide cache,
            if possible"""
-        return self._preload_file_from_system_cache(filename)
+        ret = self._preload_file_from_system_cache(filename)
+        if ret:
+            self._preloaded_files.add(filename)
+        return ret
     
     def _preload_to_cashe(self, checksum_type, checksum_data, filename):
         if not hasattr(self, '_cashe') or self._cashe is None:
