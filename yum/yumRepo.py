@@ -1532,9 +1532,21 @@ Insufficient space in download directory %s
         # note that we often don't get here. So we also do this in
         # YumPackageSack.populate ... and we look for the uncompressed versions
         # in retrieveMD.
-        self._preload_md_from_system_cache(os.path.basename(local))
+        fname = os.path.basename(local)
+        preloaded = (self._preload_md_from_system_cache(fname) or
+                     self._preload_md_from_cashe(dbmdtype, local))
         if not self._checkMD(local, dbmdtype, openchecksum=compressed,
                              data=data, check_can_fail=True):
+            if preloaded and not file_check:
+                # Given that we're dealing with non-checksum md filenames,
+                # getting here usually means that the file we just preloaded
+                # doesn't match the current repomd.xml *because* of us having
+                # fetched a newer repomd.xml than the system cache has, so make
+                # sure we don't make retrieveMD think this md file is a partial
+                # download that it can reget, to avoid corruption (see
+                # BZ#1155687).  For md filenames with checksums, this won't do
+                # any harm.
+                misc.unlink_f(local)
             return None
 
         return local
@@ -1547,7 +1559,7 @@ Insufficient space in download directory %s
 
         downloading = self._commonRetrieveDataMD_list(mdtypes)
         for (ndata, nmdtype) in downloading:
-            if not self._retrieveMD(nmdtype, retrieve_can_fail=True):
+            if not self._retrieveMD(nmdtype, retrieve_can_fail=True, fresh=True):
                 self._revertOldRepoXML()
                 return False
         self._commonRetrieveDataMD_done(downloading)
@@ -1817,7 +1829,7 @@ Insufficient space in download directory %s
            mdtype can be 'primary', 'filelists', 'other' or 'group'."""
         return self._retrieveMD(mdtype)
 
-    def _retrieveMD(self, mdtype, retrieve_can_fail=False, **kwargs):
+    def _retrieveMD(self, mdtype, retrieve_can_fail=False, fresh=False, **kwargs):
         """ Internal function, use .retrieveMD() from outside yum. """
         #  Note that this can raise Errors.RepoMDError if mdtype doesn't exist
         # for this repo.
@@ -1833,7 +1845,10 @@ Insufficient space in download directory %s
             # got it, move along
             return local
 
-        if (os.path.exists(local) or
+        # see if we already have the correct file cached and if not, try
+        # preloading it first; don't do these checks and move straight to
+        # downloading if fresh is True
+        if not fresh and (os.path.exists(local) or
             self._preload_md_from_system_cache(os.path.basename(local)) or 
             self._preload_md_from_cashe(mdtype, local)):
             if self._checkMD(local, mdtype, check_can_fail=True):
