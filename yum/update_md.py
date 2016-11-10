@@ -21,6 +21,7 @@
 Update metadata (updateinfo.xml) parsing.
 """
 
+import os
 import sys
 
 from yum.i18n import utf8_text_wrap, to_utf8, to_unicode, _
@@ -30,6 +31,7 @@ from yum.misc import to_xml, decompress, repo_gen_decompress
 from yum.misc import cElementTree_iterparse as iterparse 
 import Errors
 
+import logging
 import logginglevels
 
 import rpmUtils.miscutils
@@ -112,12 +114,14 @@ class UpdateNotice(object):
             else:
                 return '<unknown>'
 
-        def _log_failure(data):
+        def _log_failure(data, header):
             """Log the mismatched data similarly to conflict markers in git."""
             if self._vlogger is None:
                 return
-            msg = _('Duplicate of %s differs in some fields:\n')
-            msg %= other._md['update_id']
+            msg = ''
+            if header:
+                msg += _('Duplicate of %s differs in some fields:\n')
+                msg %= other._md['update_id']
             msg += '<<<<<<< %s:%s\n' % (_rid(other), data)
             msg += '%r\n=======\n%r\n' % (other._md[data], self._md[data])
             msg += '>>>>>>> %s:%s' % (_rid(self), data)
@@ -127,6 +131,7 @@ class UpdateNotice(object):
         if not other or not hasattr(other, '_md'):
             return False
 
+        result = True
         for data in ('type', 'update_id', 'status', 'rights',
                      'severity', 'release',
                      'issued', 'updated', 'version', 'pushcount',
@@ -134,24 +139,26 @@ class UpdateNotice(object):
             if data == 'status': # FIXME: See below...
                 continue
             if self._md[data] != other._md[data]:
-                _log_failure(data)
-                return False
+                _log_failure(data, result)
+                result = False
         # FIXME: Massive hack, Fedora is really broken and gives status=stable
         # and status=testing for updateinfo notices, just depending on which
         # repo. they come from.
         data = 'status'
         if self._md[data] != other._md[data]:
             if self._md[data]  not in ('stable', 'testing'):
-                _log_failure(data)
-                return False
+                _log_failure(data, result)
+                result = False
             if other._md[data] not in ('stable', 'testing'):
-                _log_failure(data)
-                return False
+                _log_failure(data, result)
+                result = False
             # They are both really "stable" ...
             self._md[data]  = 'stable'
             other._md[data] = 'stable'
 
-        return True
+        if not result:
+            self._vlogger.log(logginglevels.DEBUG_3, '\n')
+        return result
 
     def __ne__(self, other):
         return not (self == other)
@@ -443,6 +450,13 @@ class UpdateMetadata(object):
 
         self._logger  = logger
         self._vlogger = vlogger
+        cfile = os.getenv('CONFLICT_FILE')
+        if cfile is not None:
+            self._clogger = logging.getLogger('yum.verbose.update_md.conflict')
+            self._clogger.addHandler(logging.FileHandler(cfile))
+            self._clogger.setLevel(logginglevels.DEBUG_3)
+        else:
+            self._clogger = None
 
         for repo in repos:
             try: # attempt to grab the updateinfo.xml.gz from the repodata
@@ -598,7 +612,8 @@ class UpdateMetadata(object):
         for event, elem in safe_iterparse(infile, logger=self._logger):
             if elem.tag == 'update':
                 try:
-                    un = UpdateNotice(elem, repoid, self._vlogger)
+                    logger = self._vlogger if self._clogger is None else self._clogger
+                    un = UpdateNotice(elem, repoid, logger)
                 except UpdateNoticeException, e:
                     msg = _("An update notice %s is broken, skipping.") % _rid(repoid)
                     if self._vlogger:
