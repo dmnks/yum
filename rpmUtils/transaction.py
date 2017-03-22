@@ -35,7 +35,8 @@ class TransactionWrapper:
                          'setProbFilter',
                          'hdrFromFdno',
                          'next',
-                         'clean']
+                         'clean',
+                         '_verifySigs']
         self.tsflags = []
         self.open = True
 

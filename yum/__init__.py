@@ -2767,7 +2767,9 @@ much more problems).
         
         if check:
             ts = self.rpmdb.readOnlyTS()
-            sigresult = rpmUtils.miscutils.checkSig(ts, po.localPkg())
+            sigresult = rpmUtils.miscutils.checkSig(
+                ts, po.localPkg(), payload=self.conf.payload_gpgcheck,
+            )
             localfn = os.path.basename(po.localPkg())
             
             if sigresult == 0:

@@ -46,6 +46,7 @@ from misc import get_uuid_obj, read_in_items_from_dot_dir
 # Alter/patch these to change the default checking...
 __pkgs_gpgcheck_default__ = False
 __repo_gpgcheck_default__ = False
+__payload_gpgcheck_default__ = False
 __main_multilib_policy_default__ = 'all'
 __main_failovermethod_default__ = 'roundrobin'
 __main_installonly_limit_default__ = 0
@@ -791,6 +792,7 @@ class YumConf(StartupConf):
     gpgcheck = BoolOption(__pkgs_gpgcheck_default__)
     repo_gpgcheck = BoolOption(__repo_gpgcheck_default__)
     localpkg_gpgcheck = BoolOption(__pkgs_gpgcheck_default__)
+    payload_gpgcheck = BoolOption(__payload_gpgcheck_default__)
     obsoletes = BoolOption(True)
     showdupesfromrepos = BoolOption(False)
     enabled = BoolOption(True)

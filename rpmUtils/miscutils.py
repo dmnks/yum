@@ -58,11 +58,16 @@ def compareVerOnly(v1, v2):
     """compare version strings only using rpm vercmp"""
     return compareEVR(('', v1, ''), ('', v2, ''))
     
-def checkSig(ts, package):
-    """Takes a transaction set and a package, check it's sigs, 
+def checkSig(ts, package, payload=False):
+    """Takes a transaction set and a package, check it's sigs.
+
+    By default, only RPMv4 sigs (header-only) will be verified (faster).  By
+    setting payload to True, RPMv3 sigs (header+payload) will also be verified
+    (slower).
+
     return 0 if they are all fine
     return 1 if the gpg key can't be found
-    return 2 if the header is in someway damaged
+    return 2 if the header or payload is in someway damaged
     return 3 if the key is not trusted 
     return 4 if the pkg is not gpg or pgp signed"""
     
@@ -88,6 +93,24 @@ def checkSig(ts, package):
             value = 4
         else:
             del hdr
+
+    # Don't perform the payload check if the header check failed, otherwise we
+    # could mask the reason stored in "value" (we only return one integer from
+    # this function and shouldn't change that).
+    if payload and value == 0:
+        os.lseek(fdno, 0, 0)
+        # We don't want the OK message to pollute the output but we do want the
+        # BAD message (verbose version) in case of a failure, which is only
+        # possible by running _verifySigs() twice (temporary hack until we have
+        # the proper API for payload verification in RPM).
+        rpm.setVerbosity(rpm.RPMLOG_WARNING)
+        valid = ts._verifySigs(fdno, package)
+        if not valid:
+            value = 2
+            os.lseek(fdno, 0, 0)
+            rpm.setVerbosity(rpm.RPMLOG_INFO)
+            ts._verifySigs(fdno, package)
+        rpm.setVerbosity(rpm.RPMLOG_NOTICE)
 
     try:
         os.close(fdno)

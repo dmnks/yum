@@ -113,6 +113,31 @@ signature check on the repodata. When this is set in the [main] section it sets 
 default for all repositories. The default is `0'.
 
 .IP
+\fBpayload_gpgcheck\fR
+Either `1' or `0'. This tells yum whether or not it should also perform a GPG
+signature check on the payload (part of a package holding the actual files that
+comprise the package).
+
+By default, yum only performs GPG signature checks on package headers.
+Thus, if the payload data has been tampered with or corrupted, yum will fail in
+the middle of the transaction due to an RPM unpacking error, after some
+unverified scriptlets might have already run, and possibly leave the package in
+question partly installed.
+
+To prevent all of that, you can enable this option to extend the signature
+check to also include the payload, so that yum can avoid running the
+transaction in case of payload corruption.
+This slightly improves security, however at the expense of significantly
+increased transaction time, so you may want to only use this option when
+package corruption is a concern.
+
+For this option to have effect, make sure to also enable gpgcheck (or
+localpkg_gpgcheck for local packages).
+
+When this option is set in the [main] section it sets the default for all
+repositories. The default is `0'.
+
+.IP
 \fBskip_broken\fR
 Either `1' or `0'. Resolve depsolve problems by removing packages that
 are causing problems from the transaction.
