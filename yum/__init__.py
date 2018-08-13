@@ -6139,7 +6139,10 @@ much more problems).
                 # external callers should just update.
                 opts = repo._default_grabopts()
                 text = repo.id + '/gpgkey'
-            rawkey = urlgrabber.urlread(url, **opts)
+            dummy = yum.yumRepo.YumRepository('blah')
+            dummy.mirrorlist = url
+            rawkey = dummy.grab.urlread('')
+            del dummy
 
         except urlgrabber.grabber.URLGrabError, e:
             raise Errors.YumBaseError(_('GPG key retrieval failed: ') +
